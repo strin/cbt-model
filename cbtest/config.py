@@ -3,7 +3,7 @@ from common import *
 if 'datadir' in os.environ:
     cbt_datadir = os.environ['datadir']
 else:
-    cbt_datadir = 'data/CBTest/data/'
+    cbt_datadir = '../data/CBTest/data/'
 
 cbt_cn_train = os.path.join(cbt_datadir, 'cbtest_CN_train.txt')
 cbt_cn_test = os.path.join(cbt_datadir, 'cbtest_CN_test_2500ex.txt')
