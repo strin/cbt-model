@@ -5,6 +5,6 @@ from cbtest.config import *
 task = os.environ['task']
 test_path = globals()['cbt_' + task + '_test']
 
-exs = read_cbt(cbt_cn_test)
+exs = read_cbt(test_path)
 pprint(exs[:1])
-run_nonlearning(sliding_window, exs)
+print run_nonlearning(sliding_window, exs)
