@@ -1,85 +1,122 @@
 # basic embeding models as baselines.
 from cbtest.common import *
-from cbtest.layers import (log, dot, mean, softmax, Embed, floatX)
+from cbtest.layers import (log, dot, mean, softmax, Embed, floatX, stack)
 from cbtest.utils import choice
+from cbtest.evaluate import accuracy
 from cbtest.dataset import remove_stopwords, lower, remove_punctuation
+import cbtest.optimizers as optimizers
 
 import theano.tensor as T
 
-def train_embed_bow(exs,
-                    batchsize=128,
-                    hidden_dim=100,
-                    lr=1e-3,
-                    num_iter=100):
-    # first pass, create vocab.
-    vocab = {}
-    def add_word_if_not_exist(word):
-        if word not in vocab:
-            vocab[word] = len(vocab)
+class BowEmbedLearner(object):
+    def __init__(self, batchsize=1, hidden_dim=100, lr=1e-4):
+        self.batchsize = batchsize
+        self.hidden_dim = hidden_dim
+        self.lr = lr
 
-    for ex in exs:
-        for sen in ex['context']:
-            for word in sen:
+        #self.preprocess = lambda sentence:\
+        #    remove_stopwords(remove_punctuation(lower(sentence)))
+
+        self.preprocess = lambda sentence: lower(sentence) # less aggressive.
+
+
+    def compile(self, train_exs):
+        exs = train_exs
+        # first pass, create vocab.
+        vocab = {}
+        def add_word_if_not_exist(word):
+            if word not in vocab:
+                vocab[word] = len(vocab)
+
+        for ex in exs:
+            for sen in ex['context']:
+                for word in self.preprocess(sen):
+                    add_word_if_not_exist(word)
+            for word in self.preprocess(ex['query']):
                 add_word_if_not_exist(word)
-        for word in ex['query']:
-            add_word_if_not_exist(word)
-        for word in ex['candidate']:
-            add_word_if_not_exist(word)
+            for word in self.preprocess(ex['candidate']):
+                add_word_if_not_exist(word)
 
-    vocab_size = len(vocab)
-    print '[vocab size]', vocab_size
-    print '[num train exs]', len(exs)
-    print '[batchsize]', batchsize
+        vocab_size = len(vocab)
+        print '[vocab size]', vocab_size
+        print '[num train exs]', len(exs)
+        print '[batchsize]', self.batchsize
 
-    # build neural net.
-    xs = []
-    probs = []
-    ys = T.matirx('ys')
-    params = []
+        # build neural net.
+        xs = []
+        probs = []
+        ys = T.matrix('ys')
+        params = []
 
-    embed = Embed(vocab_size, hidden_dim)
-    params.append(embed.get_params().values())
+        embed = Embed(vocab_size, self.hidden_dim)
+        params.extend(embed.params)
 
-    for bi in range(batchsize):
-        c = T.lvector('context_' + str(bi))
-        c_emb = mean(embed(c))
-        qs = []
-        scores = []
-        for can_id in range(10):
-            q = T.lvector('query_' + str(bi) + '_' + str(can_id))
-            q_emb = mean(embed(q))
-            score = dot(c_emb, q_emb)
-            qs.append(q)
-            scores.append(score)
-        score_vector = stack(*scores)
-        prob = softmax(score_vector)
+        for bi in range(self.batchsize):
+            c = T.lvector('context_' + str(bi))
+            c_emb = mean(embed(c), axis=0)
+            qs = []
+            scores = []
+            for can_id in range(10):
+                q = T.lvector('query_' + str(bi) + '_' + str(can_id))
+                q_emb = mean(embed(q), axis=0)
+                score = dot(c_emb, q_emb)
+                qs.append(q)
+                scores.append(score)
+            score_vector = stack(*scores)
+            prob = softmax(score_vector)
 
-        xs.append([c] + qs)
-        probs.append(prob)
+            xs.append([c] + qs)
+            probs.append(prob)
 
-    probs = stack(*probs)
-    loss = -mean(log(probs) * ys)
+        probs = stack(*probs)
+        loss = -mean(log(probs) * ys)
 
-    updates = optimizers.Adam(loss, params, alpha=lr)
-    bprop = theano.function(inputs=sum(xs, []) + [ys],
-                                    outputs=loss, updates=updates)
+        self.fprop = theano.function(inputs=sum(xs, []), outputs=probs)
 
-    # second pass, learn embedding.
-    def sample_minibatch():
-        minibatch = choice(exs, size=batchsize, replace=True)
+        updates = optimizers.Adam(loss, params, alpha=self.lr)
+        self.bprop = theano.function(inputs=sum(xs, []) + [ys],
+                                        outputs=loss, updates=updates)
+
+        self.vocab = vocab
+
+
+    def train(self, exs, num_iter=100):
+        # second pass, learn embedding.
+        def sample_minibatch():
+            minibatch = choice(exs, size=self.batchsize, replace=True)
+            meta = {}
+            meta['minibatch'] = minibatch
+            (xvs, yvs) = self.encode_minibatch(minibatch)
+
+            return (xvs, yvs, meta)
+
+        for it in range(num_iter):
+            for ni in range(len(exs) / self.batchsize + 1):
+                (xvs, yvs, meta) = sample_minibatch()
+                yvs = np.array(yvs)
+
+                error = self.bprop(*(sum(xvs, []) + [yvs]))
+                if ni % 100 == 0:
+                    print 'epoch', it, 'iter', ni, '/', len(exs), 'error', error
+
+    def encode_minibatch(self, minibatch):
+        '''
+        encode minibatch of context + query into vector representation.
+        '''
         xvs = []
         yvs = []
         for ex in minibatch:
             context = sum(ex['context'], [])
-            context = remove_stopwords(remove_punctuation(lower(context)))
-            query = remove_stopwords(remove_punctuation(lower(ex['query'])))
+            context = self.preprocess(context)
+            query = self.preprocess(ex['query'])
             blank = query.index('xxxxx')
-            context_vector = np.array([vocab[word] for word in context], dtype=np.int64)
+            context_vector = np.array([self.vocab[word] for word in context], dtype=np.int64)
             query_vectors = []
             cind = 0
-            for (ci, candidate) in enumerate(ex['candidate']):
+            candidates = ex['candidate']
+            for (ci, candidate) in enumerate(candidates):
                 query[blank] = candidate
-                query_vector = np.array([vocab[word] for word in query], dtype=np.int64)
+                query_vector = np.array([self.vocab[word] for word in self.preprocess(query)], dtype=np.int64)
                 query_vectors.append(query_vector)
                 if candidate == ex['answer']:
                     cind = ci
@@ -88,16 +125,29 @@ def train_embed_bow(exs,
             yv[cind] = 1.
 
             xvs.append([context_vector] + query_vectors)
-            yvs.append(y)
-
+            yvs.append(yv)
         return (xvs, yvs)
 
-    for it in range(num_iter):
-        (xvs, yvs) = sample_minibatch()
-        yvs = np.array(yvs)
 
-        error = bprop(*sum(xvs, []), yvs)
-        print 'iter', it, 'error', error
+    def test(self, exs):
+        all_preds = []
+        all_truths = []
+        for offset in range(0, len(exs), self.batchsize):
+            minibatch = exs[offset:offset + self.batchsize]
+            while len(minibatch) < self.batchsize:
+                minibatch.append(minibatch[-1])
+            (xvs, yvs) = self.encode_minibatch(minibatch)
+            yvs = np.array(yvs)
+            probs = np.argmax(self.fprop(*(sum(xvs, [])))[0], axis=1)
+            truths = np.argmax(yvs, axis=1)
+            all_preds.extend(probs[:min(self.batchsize, len(exs)-offset)])
+            all_truths.extend(truths[:min(self.batchsize, len(exs)-offset)])
+        acc = accuracy(all_preds, all_truths)
+        print 'accuracy', acc
+        return acc
+
+
+
 
 
 

@@ -40,9 +40,12 @@ def lower(words):
 def remove_punctuation(words):
     return [word for word in words if re.match(r'[a-zA-Z\-]+', word)] # TODO: avoid removing things like *bird's*
 
-
+en_stopwords = None
 def remove_stopwords(words):
     from nltk.corpus import stopwords
-    return [word for word in words if word not in set(stopwords.words('english'))]
+    global en_stopwords
+    if not en_stopwords:
+        en_stopwords = set(stopwords.words('english'))
+    return [word for word in words if word not in en_stopwords]
 
 

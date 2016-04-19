@@ -1,0 +1,2 @@
+#!/bin/sh
+read uuid; echo https://codalab.stanford.edu/bundles/$uuid

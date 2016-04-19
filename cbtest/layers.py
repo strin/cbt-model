@@ -1,5 +1,4 @@
-import theano
-import theano.tensor as T
+from common import *
 
 floatX = theano.config.floatX
 log = T.log
@@ -17,7 +16,7 @@ class Embed(object):
     def __init__(self, vocab_size, hidden_dim):
         self.vocab_size = vocab_size
         self.hidden_dim = hidden_dim
-        self.W = theano.shared(value=(npr.randn(vocab_size, hidden_dim) * 0.01).astype(),
+        self.W = theano.shared(value=(npr.randn(vocab_size, hidden_dim) * 0.01).astype(theano.config.floatX),
                                name='W')
         self.params = [self.W]
 
