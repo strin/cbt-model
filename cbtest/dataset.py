@@ -37,6 +37,10 @@ def lower(words):
     return [word.strip().lower() for word in words]
 
 
+def filter(words, vocab):
+    return [word for word in words if word in vocab]
+
+
 def remove_punctuation(words):
     return [word for word in words if re.match(r'[a-zA-Z\-]+', word)] # TODO: avoid removing things like *bird's*
 

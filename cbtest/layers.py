@@ -5,9 +5,21 @@ log = T.log
 dot = T.dot
 mean = T.mean
 softmax = T.nnet.softmax
+tanh = T.tanh
+sigmoid = T.nnet.sigmoid
 
 def stack(*tensors):
     return T.stack(tensors, axis=0)
+
+
+def ortho_weight(ndim):
+    '''
+    generate orthogonal weights (row vectors)
+    '''
+    W = npr.randn(ndim, ndim)
+    u, s, v = npla.svd(W)
+    return np.transpose(u.astype(theano.config.floatX))
+
 
 class Embed(object):
     '''
@@ -33,6 +45,63 @@ class Embed(object):
 
     def __call__(self, symbols):
         return self.W[symbols, :]
+
+
+class LSTM(object):
+    '''
+    basic LSTM layer
+    '''
+    def __init__(self, hidden_dim):
+        self.hidden_dim = hidden_dim
+        self.W = theano.shared(
+                    np.concatenate([ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim)], axis=0),
+                    name='W'
+                )
+
+        self.U = theano.shared(
+                    np.concatenate([ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim)], axis=0),
+                    name='U'
+                )
+        self.b = theano.shared(
+                    np.zeros(4 * hidden_dim),
+                    name='b'
+                )
+
+    def _step(self, x, c, h):
+        W = lambda i: self.W[self.hidden_dim * (i-1) : self.hidden_dim * i, :]
+        U = lambda i: self.U[self.hidden_dim * (i-1) : self.hidden_dim * i, :]
+        b = lambda i: self.b[self.hidden_dim * (i-1) : self.hidden_dim * i]
+        i = sigmoid(dot(W(1), x) + dot(U(1), h) + b(1))
+        f = sigmoid(dot(W(2), x) + dot(U(2), h) + b(2))
+        o = sigmoid(dot(W(3), x) + dot(U(3), h) + b(3))
+        _c = tanh(dot(W(4), x) + dot(U(4), h) + b(4))
+
+        c = _c * i + c * f
+        h = o * tanh(c)
+
+        return c, h
+
+
+    def __call__(self, inputs):
+        zero = np.array([0.], dtype=theano.config.floatX)[0]
+        result, updates = theano.scan(lambda x, c, h: self._step(x, c, h),
+                                      outputs_info = [T.alloc(zero, self.hidden_dim),
+                                                    T.alloc(zero, self.hidden_dim),
+                                                      ],
+                                        name='lstm_layer',
+                                        sequences=[inputs]
+                    )
+        return result[1][-1] # return h.
+
+
+
+
 
 
 

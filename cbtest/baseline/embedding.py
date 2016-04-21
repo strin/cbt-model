@@ -1,9 +1,9 @@
 # basic embeding models as baselines.
 from cbtest.common import *
-from cbtest.layers import (log, dot, mean, softmax, Embed, floatX, stack)
+from cbtest.layers import (log, dot, mean, softmax, Embed, floatX, stack, LSTM)
 from cbtest.utils import choice
-from cbtest.evaluate import accuracy
-from cbtest.dataset import remove_stopwords, lower, remove_punctuation
+from cbtest.evaluate import (accuracy, disagree)
+from cbtest.dataset import remove_stopwords, lower, remove_punctuation, filter
 import cbtest.optimizers as optimizers
 
 import theano.tensor as T
@@ -20,9 +20,7 @@ class BowEmbedLearner(object):
         self.preprocess = lambda sentence: lower(sentence) # less aggressive.
 
 
-    def compile(self, train_exs):
-        exs = train_exs
-        # first pass, create vocab.
+    def create_vocab(self, exs):
         vocab = {}
         def add_word_if_not_exist(word):
             if word not in vocab:
@@ -41,6 +39,15 @@ class BowEmbedLearner(object):
         print '[vocab size]', vocab_size
         print '[num train exs]', len(exs)
         print '[batchsize]', self.batchsize
+        self.vocab = vocab
+        self.vocab_size = vocab_size
+
+
+    def compile(self, train_exs):
+        exs = train_exs
+
+        # first pass, create vocab.
+        self.create_vocab(exs)
 
         # build neural net.
         xs = []
@@ -48,7 +55,7 @@ class BowEmbedLearner(object):
         ys = T.matrix('ys')
         params = []
 
-        embed = Embed(vocab_size, self.hidden_dim)
+        embed = Embed(self.vocab_size, self.hidden_dim)
         params.extend(embed.params)
 
         for bi in range(self.batchsize):
@@ -76,8 +83,6 @@ class BowEmbedLearner(object):
         updates = optimizers.Adam(loss, params, alpha=self.lr)
         self.bprop = theano.function(inputs=sum(xs, []) + [ys],
                                         outputs=loss, updates=updates)
-
-        self.vocab = vocab
 
 
     def train(self, exs, num_iter=100):
@@ -107,8 +112,8 @@ class BowEmbedLearner(object):
         yvs = []
         for ex in minibatch:
             context = sum(ex['context'], [])
-            context = self.preprocess(context)
-            query = self.preprocess(ex['query'])
+            context = filter(self.preprocess(context), self.vocab)
+            query = filter(self.preprocess(ex['query']), self.vocab)
             blank = query.index('xxxxx')
             context_vector = np.array([self.vocab[word] for word in context], dtype=np.int64)
             query_vectors = []
@@ -116,7 +121,7 @@ class BowEmbedLearner(object):
             candidates = ex['candidate']
             for (ci, candidate) in enumerate(candidates):
                 query[blank] = candidate
-                query_vector = np.array([self.vocab[word] for word in self.preprocess(query)], dtype=np.int64)
+                query_vector = np.array([self.vocab[word] for word in filter(self.preprocess(query), self.vocab)], dtype=np.int64)
                 query_vectors.append(query_vector)
                 if candidate == ex['answer']:
                     cind = ci
@@ -143,8 +148,64 @@ class BowEmbedLearner(object):
             all_preds.extend(probs[:min(self.batchsize, len(exs)-offset)])
             all_truths.extend(truths[:min(self.batchsize, len(exs)-offset)])
         acc = accuracy(all_preds, all_truths)
+        errs = disagree(all_preds, all_truths)
         print 'accuracy', acc
-        return acc
+        return (acc, errs)
+
+
+class LSTMEncoder(BowEmbedLearner):
+    def __init__(self, batchsize=1, hidden_dim=100, lr=1e-4):
+        self.batchsize = batchsize
+        self.hidden_dim = hidden_dim
+        self.lr = lr
+
+        #self.preprocess = lambda sentence:\
+        #    remove_stopwords(remove_punctuation(lower(sentence)))
+
+        self.preprocess = lambda sentence: lower(sentence) # less aggressive.
+
+
+    def compile(self, train_exs):
+        exs = train_exs
+        self.create_vocab(exs)
+
+        # build LSTM encoder.
+        xs = []
+        probs = []
+        ys = T.matrix('ys')
+        params = []
+
+        embed = Embed(self.vocab_size, self.hidden_dim)
+        lstm = LSTM(self.hidden_dim)
+        params.extend(embed.params)
+
+        for bi in range(self.batchsize):
+            c = T.lvector('context_' + str(bi))
+            c_emb = lstm(embed(c))
+            qs = []
+            scores = []
+            for can_id in range(10):
+                q = T.lvector('query_' + str(bi) + '_' + str(can_id))
+                q_emb = lstm(embed(q))
+                score = dot(c_emb, q_emb)
+                qs.append(q)
+                scores.append(score)
+            score_vector = stack(*scores)
+            prob = softmax(score_vector)
+
+            xs.append([c] + qs)
+            probs.append(prob)
+
+        probs = stack(*probs)
+        loss = -mean(log(probs) * ys)
+
+        print '[compiling back prop]'
+        self.fprop = theano.function(inputs=sum(xs, []), outputs=probs)
+
+        updates = optimizers.Adam(loss, params, alpha=self.lr)
+        print '[compiling forward prop]'
+        self.bprop = theano.function(inputs=sum(xs, []) + [ys],
+                                        outputs=loss, updates=updates)
 
 
 
