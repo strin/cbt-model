@@ -72,6 +72,8 @@ class LSTM(object):
                     np.zeros(4 * hidden_dim),
                     name='b'
                 )
+        self.params = [self.W, self.U, self.b]
+
 
     def _step(self, x, c, h):
         W = lambda i: self.W[self.hidden_dim * (i-1) : self.hidden_dim * i, :]
@@ -98,6 +100,40 @@ class LSTM(object):
                                         sequences=[inputs]
                     )
         return result[1][-1] # return h.
+
+
+class MemoryLayer(object):
+    def __init__(self, mem_size, vocab_size, hidden_dim, config={}):
+        self.mem_size = mem_size
+        self.vocab_size = vocab_size
+        self.config = config
+        self.input_embed = Embed(vocab_size, hidden_dim)
+        self.output_embed = Embed(vocab_size, hidden_dim)
+
+    def __call__(self, xs, u):
+        '''
+        xs is a list of context symbols.
+        q is the question symbols.
+        '''
+        ms = []
+        cs = []
+
+        for x in xs:
+            m = mean(self.input_embed(x))
+            c = mean(self.output_embed(x))
+            ms.append(m)
+            cs.append(c)
+
+        m = stack(*ms)
+        c = stack(*cs)
+
+        p = softmax(dot(m, u))
+        o = dot(p, c)
+
+        return o
+
+
+
 
 
 

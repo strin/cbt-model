@@ -178,6 +178,7 @@ class LSTMEncoder(BowEmbedLearner):
         embed = Embed(self.vocab_size, self.hidden_dim)
         lstm = LSTM(self.hidden_dim)
         params.extend(embed.params)
+        params.extend(lstm.params)
 
         for bi in range(self.batchsize):
             c = T.lvector('context_' + str(bi))
@@ -208,7 +209,60 @@ class LSTMEncoder(BowEmbedLearner):
                                         outputs=loss, updates=updates)
 
 
+class MemoryNetwork(BowEmbedLearner):
+    def __init__(self, batchsize=1, hidden_dim=100, lr=1e-4):
+        self.batchsize = batchsize
+        self.hidden_dim = hidden_dim
+        self.lr = lr
 
+        #self.preprocess = lambda sentence:\
+        #    remove_stopwords(remove_punctuation(lower(sentence)))
+
+        self.preprocess = lambda sentence: lower(sentence) # less aggressive.
+
+
+    def compile(self, train_exs):
+        exs = train_exs
+        self.create_vocab(exs)
+
+        # build LSTM encoder.
+        xs = []
+        probs = []
+        ys = T.matrix('ys')
+        params = []
+
+        embed = Embed(self.vocab_size, self.hidden_dim)
+        lstm = LSTM(self.hidden_dim)
+        params.extend(embed.params)
+        params.extend(lstm.params)
+
+        for bi in range(self.batchsize):
+            c = T.lvector('context_' + str(bi))
+            c_emb = lstm(embed(c))
+            qs = []
+            scores = []
+            for can_id in range(10):
+                q = T.lvector('query_' + str(bi) + '_' + str(can_id))
+                q_emb = lstm(embed(q))
+                score = dot(c_emb, q_emb)
+                qs.append(q)
+                scores.append(score)
+            score_vector = stack(*scores)
+            prob = softmax(score_vector)
+
+            xs.append([c] + qs)
+            probs.append(prob)
+
+        probs = stack(*probs)
+        loss = -mean(log(probs) * ys)
+
+        print '[compiling back prop]'
+        self.fprop = theano.function(inputs=sum(xs, []), outputs=probs)
+
+        updates = optimizers.Adam(loss, params, alpha=self.lr)
+        print '[compiling forward prop]'
+        self.bprop = theano.function(inputs=sum(xs, []) + [ys],
+                                        outputs=loss, updates=updates)
 
 
 
