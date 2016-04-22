@@ -109,6 +109,9 @@ class MemoryLayer(object):
         self.config = config
         self.input_embed = Embed(vocab_size, hidden_dim)
         self.output_embed = Embed(vocab_size, hidden_dim)
+        self.params = []
+        self.params.extend(self.input_embed.params)
+        self.params.extend(self.output_embed.params)
 
     def __call__(self, xs, u):
         '''

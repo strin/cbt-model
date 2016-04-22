@@ -2,18 +2,22 @@ import numpy as np
 import theano
 import theano.tensor as T
 
+if theano.config.floatX == 'float32':
+    FX = np.float32
+else:
+    FX = np.float64
 
-def Adam(cost, params, alpha=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
+def Adam(cost, params, alpha=FX(0.001), beta_1=FX(0.9), beta_2=FX(0.999), epsilon=FX(1e-8)):
     '''
         Follows the psuedo-code from
             ADAM: A METHOD FOR STOCHASTIC OPTIMIZATION
                 http://arxiv.org/pdf/1412.6980v8.pdf
     '''
     updates = []
-    t = theano.shared(value=1., name='t')
+    t = theano.shared(value=FX(1.), name='t')
     grads = T.grad(cost, params)
 
-    alpha_t = alpha * T.sqrt(1. - beta_2**t) / (1. - beta_1**t)
+    alpha_t = alpha * T.sqrt(FX(1.) - beta_2**t) / (FX(1.) - beta_1**t)
     for param, gparam in zip(params, grads):
         value = param.get_value(borrow=True)
         # initialize first and second moment updates parameter-wise
@@ -23,8 +27,8 @@ def Adam(cost, params, alpha=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
                           broadcastable=param.broadcastable, name='v')
 
         # update biased first/second moment estimates
-        m_t = beta_1 * m + (1. - beta_1) * gparam
-        v_t = beta_2 * v + (1. - beta_2) * T.sqr(gparam)
+        m_t = beta_1 * m + (FX(1.) - beta_1) * gparam
+        v_t = beta_2 * v + (FX(1.) - beta_2) * T.sqr(gparam)
 
         # use the efficient update from sec. 2 of the paper to avoid
         # computing the unbiased estimates
