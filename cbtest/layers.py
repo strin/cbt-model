@@ -69,7 +69,7 @@ class LSTM(object):
                     name='U'
                 )
         self.b = theano.shared(
-                    np.zeros(4 * hidden_dim),
+                    np.zeros(4 * hidden_dim, dtype=theano.config.floatX),
                     name='b'
                 )
         self.params = [self.W, self.U, self.b]

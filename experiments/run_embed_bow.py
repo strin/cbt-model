@@ -23,7 +23,6 @@ print '[train_path]', train_path
 print '[test_path]', test_path
 
 train_exs = read_cbt(train_path)
-train_exs = train_exs[:2500]
 
 test_exs = read_cbt(test_path)
 

@@ -202,7 +202,7 @@ class LSTMEncoder(BowEmbedLearner):
         print '[compiling forward prop]'
         self.fprop = theano.function(inputs=sum(xs, []), outputs=probs)
 
-        updates = optimizers.Adam(loss, params, alpha=self.lr)
+        updates = optimizers.Adam(loss, params, alpha=FX(self.lr))
         print '[compiling backward prop]'
         self.bprop = theano.function(inputs=sum(xs, []) + [ys],
                                         outputs=loss, updates=updates, profile=False)
