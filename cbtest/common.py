@@ -9,3 +9,4 @@ if theano.config.floatX == 'float32':
     FX = np.float32
 else:
     FX = np.float64
+floatX = FX

@@ -1,9 +1,10 @@
 # utils for CBT dataset.
 import re
+import pickle
 from pprint import pprint
 from cbtest.config import cbt_cn_test
 
-def read_cbt(path):
+def read_cbt(path, limit=None):
     with open(path, 'r') as f:
         exs = []
         context = []
@@ -19,6 +20,10 @@ def read_cbt(path):
                 query = sentence[0].strip().split(' ')
                 answer = sentence[1].strip()
                 candidate = sentence[3].strip().split('|')
+                candidate = [c for c in candidate if c]
+                while len(candidate) < 10:
+                    candidate.append('<null>')
+                assert(len(candidate) == 10)
                 ex = {
                     'context': context,
                     'query': query,
@@ -27,10 +32,19 @@ def read_cbt(path):
                 }
                 assert(len(context) == 20)
                 exs.append(ex)
+                if limit and len(exs) > limit:
+                    break
                 context = []
             else:
                 context.append(sentence.strip().split(' '))
         return exs
+
+
+def copy_cbt(exs):
+    '''
+    make a deep copy of cbt dataset
+    '''
+    return pickle.loads(pickle.dumps(exs))
 
 
 def lower(words):
@@ -39,6 +53,10 @@ def lower(words):
 
 def filter(words, vocab):
     return [word for word in words if word in vocab]
+
+
+def unkify(words, vocab, unk='<unk>'):
+    return map(lambda word: word if word in vocab else unk, words)
 
 
 def remove_punctuation(words):
