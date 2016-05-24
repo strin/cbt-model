@@ -5,6 +5,14 @@ from pprint import pprint
 from cbtest.config import cbt_cn_test
 
 def read_cbt(path, limit=None):
+    '''
+    read in a children's book dataset.
+    return list of dicts. Each dict is an object with keys:
+        1. context   # the context sentences.
+        2. query     # the query with blank.
+        3. answer    # correct answer word.
+        4. candidate # list of answer candidates
+    '''
     with open(path, 'r') as f:
         exs = []
         context = []

@@ -146,9 +146,7 @@ class LinearLayer(Layer):
 
 class MemoryLayer(object):
     def __init__(self, batchsize, mem_size, sen_maxlen, vocab_size, hidden_dim,
-                 encoder='bow', flags={
-                        'position_encoding': False
-                     }):
+                 encoder='bow', **kwargs):
         self.batchsize = batchsize
         self.mem_size = mem_size
         self.sen_maxlen = sen_maxlen
@@ -156,6 +154,7 @@ class MemoryLayer(object):
         self.vocab_size = vocab_size
         self.encoder = encoder
         self.params = []
+        self.kwargs = kwargs
 
         self.input_embed = Embed(vocab_size, hidden_dim)
         self.output_embed = Embed(vocab_size, hidden_dim)
@@ -163,7 +162,7 @@ class MemoryLayer(object):
         self.params.extend(self.output_embed.params)
 
         if encoder == 'bow':
-            if flags['position_encoding']:
+            if kwargs['position_encoding']:
                 print '[memory layer] use PE'
                 lmat = position_encoding(self.sen_maxlen, self.hidden_dim)
                 self.encoder_func = lambda m: mean(m * lmat, axis=2)
