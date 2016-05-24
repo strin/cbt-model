@@ -16,6 +16,7 @@ parser.add_argument('--iter', type=int, default=20)
 parser.add_argument('--encoder', type=str, default='bow')
 parser.add_argument('--memory', type=str, default='lexical')
 parser.add_argument('--small', type=bool, default=False)
+parser.add_argument('--PE', type=str, default=True) # Position Encoding.
 
 args = parser.parse_args()
 print colorize('[arguments]\t' + str(args), 'red')
@@ -34,11 +35,11 @@ try:
         train_exs = read_cbt(train_path)
     test_exs = read_cbt(test_path)
 
-    learner = CBTLearner(batchsize=64, hidden_dim=100, lr=args.lr)
+    learner = CBTLearner(batchsize=64, hidden_dim=100, lr=args.lr, position_encoding=args.PE)
     learner.create_vocab(train_exs)
     learner.preprocess_dataset(train_exs)
     learner.preprocess_dataset(test_exs)
-    
+
     if args.memory == 'lexical':
         learner.mem_size = 1024
         learner.unit_size = 1
@@ -46,7 +47,6 @@ try:
         learner.encode_context = learner.encode_context_lexical
         learner.encode_query = learner.encode_query_lexical
         learner.arch = learner.arch_memnet_lexical
-        learner.kwarg['position_encoding'] = True
     elif args.memory == 'window':
         param_b = 2
         learner.mem_size = 1024
@@ -55,7 +55,6 @@ try:
         learner.encode_context = learner.encode_context_window
         learner.encode_query = learner.encode_query_window
         learner.arch = learner.arch_memnet_lexical
-        learner.kwargs['position_encoding'] = False
     elif args.memory == 'sentence':
         learner.mem_size = 20
         learner.unit_size = 1024
@@ -63,7 +62,6 @@ try:
         learner.encode_context = learner.encode_context_sentence
         learner.encode_query = learner.encode_query_sentence
         learner.arch = learner.arch_memnet_lexical
-        learner.kwargs['position_encoding'] = False
 
     learner.compile()
 

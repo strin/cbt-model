@@ -18,14 +18,14 @@ def position_encoding(senlen, dim):
     '''
     global _position_encoding
     if _position_encoding.get((senlen, dim)) == None:
-        lmat = np.zeros((1, senlen, dim), dtype=floatX)
+        lmat = np.zeros((senlen, dim), dtype=floatX)
         J = float(senlen)
         D = float(dim)
         for j in range(senlen):
             for k in range(dim):
-                lmat[0, j, k] = (1. - (j + 1) / J) - \
+                lmat[j, k] = (1. - (j + 1) / J) - \
                         ((k + 1) / D) * (1. - 2 * (j + 1) / J)
-        _position_encoding[(senlen, dim)] = theano.shared(lmat, broadcastable=(True, False, False))
+        _position_encoding[(senlen, dim)] = theano.shared(lmat, broadcastable=(False, False))
     return _position_encoding[(senlen, dim)]
 
 
@@ -164,13 +164,10 @@ class MemoryLayer(object):
         if encoder == 'bow':
             if kwargs['position_encoding']:
                 print '[memory layer] use PE'
-                lmat = position_encoding(self.sen_maxlen, self.hidden_dim)
+                lmat = position_encoding(self.sen_maxlen, self.hidden_dim).dimshuffle('x', 'x', 0, 1)
                 self.encoder_func = lambda m: mean(m * lmat, axis=2)
             else:
                 self.encoder_func = lambda m: mean(m, axis=2)
-        elif encoder == 'lexical':
-            lmat = position_encoding(self.sen_maxlen, self.hidden_dim)
-            self.encoder_func = lambda m: (m * lmat).dimshuffle(0, 3, 1, 2).flatten(3).dimshuffle(0, 2, 1)
         elif encoder == 'lstm':
             lstm = LSTM(self.batchsize, self.hidden_dim)
             self.params.extend(lstm.params)

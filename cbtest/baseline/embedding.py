@@ -141,7 +141,7 @@ class CBTLearner(object):
         q = T.reshape(question_layer(querys.flatten()),
                       (self.batchsize, self.sen_maxlen, self.hidden_dim)
                       )
-        lmat = position_encoding(self.sen_maxlen, self.hidden_dim)
+        lmat = position_encoding(self.sen_maxlen, self.hidden_dim).dimshuffle('x', 0, 1)
         if self.kwargs.get('position_encoding'):
             print '[memory network] use PE'
             q = q * lmat
