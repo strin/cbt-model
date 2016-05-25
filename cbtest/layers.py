@@ -183,6 +183,15 @@ class MemoryLayer(object):
             self.encoder_func = lambda m: linear(m.dimshuffle(0, 1, 3, 2)).flatten(3)
 
 
+    def get_probs(self, contexts, u):
+        # memory vectors.
+        m = T.reshape(self.input_embed(contexts.flatten()), (self.batchsize, self.mem_size, self.sen_maxlen, self.hidden_dim))
+        m = self.encoder_func(m)
+        probs, updates = theano.scan(fn=lambda mvs, uv: softmax(dot(mvs, uv)),
+                        sequences=[m, u]
+                        )
+        return probs
+
     def __call__(self, contexts, u):
         '''
         assume #context = mem_size
@@ -190,16 +199,11 @@ class MemoryLayer(object):
         contexts has shape (batchsize, #context, seqlen)
         u has shape (batchsize, hidden_dim)
         '''
-        # memory vectors.
-        m = T.reshape(self.input_embed(contexts.flatten()), (self.batchsize, self.mem_size, self.sen_maxlen, self.hidden_dim))
-        m = self.encoder_func(m)
+        probs = self.get_probs(contexts, u)
+
         # output vectors.
         c = T.reshape(self.output_embed(contexts.flatten()), (self.batchsize, self.mem_size, self.sen_maxlen, self.hidden_dim))
         c = self.encoder_func(c)
-
-        probs, updates = theano.scan(fn=lambda mvs, uv: softmax(dot(mvs, uv)),
-                        sequences=[m, u]
-                        )
 
         outputs, updates = theano.scan(fn=lambda probv, cv: dot(cv, T.transpose(probv)),
                                        sequences=[probs, c.dimshuffle(0, 2, 1)]

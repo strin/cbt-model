@@ -62,6 +62,19 @@ try:
         learner.encode_context = learner.encode_context_sentence
         learner.encode_query = learner.encode_query_sentence
         learner.arch = learner.arch_memnet_lexical
+    elif args.memory == 'selfsup':
+        param_b = 2
+        learner.mem_size = 1024
+        learner.unit_size = 2 * param_b + 1
+        learner.sen_maxlen = 2 * param_b + 1
+        learner.encode_context = learner.encode_context_selfsup
+        learner.encode_query = learner.encode_query_selfsup
+        learner.encode_label = learner.encode_label_selfsup
+        learner.encode_candidate = learner.encode_candidate_selfsup
+        learner.arch = learner.arch_memnet_selfsup
+        learner.loss = learner.loss_selfsup
+        learner.test = learner.test_selfsup
+
 
     learner.compile()
 

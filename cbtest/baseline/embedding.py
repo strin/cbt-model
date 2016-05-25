@@ -95,12 +95,16 @@ class CBTLearner(object):
         raise NotImplementedError()
 
 
+    def encode_label(self, ex):
+        return self.vocab[ex['answer']]
+
+
+    def encode_candidate(self, ex):
+        cv = [self.vocab[word] for word in ex['candidate']]
+        return cv
+
+
     def arch(self):
-        raise NotImplementedError()
-
-
-    def loss(self):
-        yvs = T.lvector('yvs')
         raise NotImplementedError()
 
 
@@ -113,12 +117,8 @@ class CBTLearner(object):
             query = self.encode_query(ex)
             contexts.append(self.encode_context(ex))
             querys.append(self.encode_query(ex))
-
-
-            yvs.append(self.vocab[ex['answer']])
-
-            cv = [self.vocab[word] for word in ex['candidate']]
-            cvs.append(cv)
+            yvs.append(self.encode_label(ex))
+            cvs.append(self.encode_candidate(ex))
         contexts = np.vstack([context[np.newaxis, ...] for context in contexts])
         querys = np.array(querys, dtype=np.int64)
         yvs = np.array(yvs, dtype=np.int64)
@@ -141,8 +141,8 @@ class CBTLearner(object):
         q = T.reshape(question_layer(querys.flatten()),
                       (self.batchsize, self.sen_maxlen, self.hidden_dim)
                       )
-        lmat = position_encoding(self.sen_maxlen, self.hidden_dim).dimshuffle('x', 0, 1)
         if self.kwargs.get('position_encoding'):
+            lmat = position_encoding(self.sen_maxlen, self.hidden_dim).dimshuffle('x', 0, 1)
             print '[memory network] use PE'
             q = q * lmat
         u = mean(q, axis=1)
@@ -258,6 +258,67 @@ class CBTLearner(object):
         return enc
 
 
+    def encode_query_selfsup(self, ex, param_b=2):
+        return self.encode_query_window(ex, param_b=param_b)
+
+
+    def encode_context_selfsup(self, ex, param_b=2):
+        return self.encode_context_window(ex, param_b=param_b)
+
+
+    def encode_label_selfsup(self, ex, param_b=2):
+        contexts = self.encode_context_selfsup(ex, param_b=param_b)
+        answer = self.vocab[ex['answer']]
+        targets = [int(context[param_b] == answer) for context in contexts]
+        return np.array(targets, dtype=np.int64)
+
+
+    def encode_candidate_selfsup(self, ex, param_b=2):
+        contexts = self.encode_context_selfsup(ex, param_b=param_b)
+        return np.array([context[param_b] for context in contexts], dtype=np.int64)
+
+
+    def arch_memnet_selfsup(self):
+        '''
+        memory net with self supervision.
+        '''
+        contexts = T.ltensor3('contexts')
+        querys = T.lmatrix('querys')
+        yvs = T.lmatrix('yvs')
+
+        params = []
+        question_layer = Embed(self.vocab_size, self.hidden_dim)
+        q = T.reshape(question_layer(querys.flatten()),
+                      (self.batchsize, self.sen_maxlen, self.hidden_dim)
+                      )
+        if self.kwargs.get('position_encoding'):
+            lmat = position_encoding(self.sen_maxlen, self.hidden_dim).dimshuffle('x', 0, 1)
+            print '[memory network] use PE'
+            q = q * lmat
+        u = mean(q, axis=1)
+        params.extend(question_layer.params)
+
+        mem_layer = MemoryLayer(self.batchsize, self.mem_size, self.unit_size, self.vocab_size, self.hidden_dim,
+                                **self.kwargs)
+        probs = mem_layer.get_probs(contexts, u).dimshuffle(0, 2)
+
+        inputs = {
+            'contexts': contexts,
+            'querys': querys,
+            'yvs': yvs,
+            'cvs': T.lmatrix('cvs')
+        }
+        return (probs, inputs, params)
+
+
+    def loss_selfsup(self, probs, yvs):
+        return -mean(log(T.sum(probs * yvs, axis=1)))
+
+
+    def loss(self, probs, yvs):
+        return -mean(log(probs[T.arange(self.batchsize), yvs]))
+
+
     def compile(self):
         (probs, inputs, params) = self.arch()
 
@@ -270,8 +331,9 @@ class CBTLearner(object):
         self.fprop = theano.function(inputs=[contexts, querys, cvs], outputs=probs,
                                      on_unused_input='ignore')
 
+        loss = self.loss(probs, yvs)
+
         # build backward propagation.
-        loss = -mean(log(probs[T.arange(self.batchsize), yvs]))
         updates = optimizers.Adam(loss, params, alpha=FX(self.lr))
         self.bprop = theano.function(inputs=[contexts, querys, cvs, yvs],
                                         outputs=loss, updates=updates,
@@ -299,6 +361,35 @@ class CBTLearner(object):
                     print 'iter', ni * self.batchsize, '/', len(exs), 'error', error
 
 
+    def test_selfsup(self, exs):
+        self.preprocess_dataset(exs)
+
+        all_preds = []
+        all_truths = []
+        for offset in range(0, len(exs), self.batchsize):
+            minibatch = exs[offset:offset + self.batchsize]
+            while len(minibatch) < self.batchsize:
+                minibatch.append(minibatch[-1])
+            (contexts, querys, cvs, _) = self.encode_minibatch(minibatch)
+            yvs = np.array([self.vocab[ex['answer']] for ex in minibatch], dtype=floatX)
+            preds = []
+            probs = self.fprop(contexts, querys, cvs)
+            for bi in range(self.batchsize):
+                candidates = set(cvs[bi, :])
+                if 0 in candidates:
+                    candidates.remove(0)
+                prob_by_candidate = {c: sum(probs[bi, cvs[bi, :] == c]) for c in candidates}
+                preds.append(max(prob_by_candidate, key=lambda c: prob_by_candidate[c]))
+            truths = np.array(yvs, dtype=np.int64)
+            if sum(truths == 1):
+                print '[warning] unknown word in answer'
+            truths[truths == 1] = -1
+            all_preds.extend(preds[:min(self.batchsize, len(exs)-offset)])
+            all_truths.extend(truths[:min(self.batchsize, len(exs)-offset)])
+        acc = accuracy(all_preds, all_truths)
+        errs = disagree(all_preds, all_truths)
+        return (acc, errs)
+
 
     def test(self, exs):
         self.preprocess_dataset(exs)
@@ -312,7 +403,7 @@ class CBTLearner(object):
             (contexts, querys, cvs, yvs) = self.encode_minibatch(minibatch)
             yvs = np.array(yvs).astype(theano.config.floatX)
             inds = np.argmax(self.fprop(contexts, querys, cvs)
-                              [np.transpose([range(self.batchsize)] * self.num_candidate),
+                              [np.transpose([range(cvs.shape[0])] * cvs.shape[1]),
                                cvs], axis=1)
             preds = cvs[range(self.batchsize), inds]
             truths = np.array(yvs, dtype=np.int64)
