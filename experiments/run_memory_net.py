@@ -15,8 +15,9 @@ parser.add_argument('--dim', type=int, default=100)
 parser.add_argument('--iter', type=int, default=20)
 parser.add_argument('--encoder', type=str, default='bow')
 parser.add_argument('--memory', type=str, default='lexical')
-parser.add_argument('--small', type=bool, default=False)
+parser.add_argument('--small', action='store_true')
 parser.add_argument('--PE', action='store_true')
+parser.add_argument('--window_b', type=float, default=2)
 
 args = parser.parse_args()
 print colorize('[arguments]\t' + str(args), 'red')
@@ -35,7 +36,8 @@ try:
         train_exs = read_cbt(train_path)
     test_exs = read_cbt(test_path)
 
-    learner = CBTLearner(batchsize=64, hidden_dim=100, lr=args.lr, position_encoding=args.PE)
+    learner = CBTLearner(batchsize=64, hidden_dim=100, lr=args.lr, encoder=args.encoder, 
+            position_encoding=args.PE)
     learner.create_vocab(train_exs)
     learner.preprocess_dataset(train_exs)
     learner.preprocess_dataset(test_exs)
@@ -48,12 +50,12 @@ try:
         learner.encode_query = learner.encode_query_lexical
         learner.arch = learner.arch_memnet_lexical
     elif args.memory == 'window':
-        param_b = 2
+        param_b = args.window_b
         learner.mem_size = 1024
         learner.unit_size = 2 * param_b + 1
         learner.sen_maxlen = 2 * param_b + 1
-        learner.encode_context = learner.encode_context_window
-        learner.encode_query = learner.encode_query_window
+        learner.encode_context = lambda ex: learner.encode_context_window(ex, param_b=param_b)
+        learner.encode_query = lambda ex: learner.encode_query_window(ex, param_b=param_b)
         learner.arch = learner.arch_memnet_lexical
     elif args.memory == 'sentence':
         learner.mem_size = 20

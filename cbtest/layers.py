@@ -169,6 +169,7 @@ class MemoryLayer(object):
             else:
                 self.encoder_func = lambda m: mean(m, axis=2)
         elif encoder == 'lstm':
+            print 'using LSTM encoder'
             lstm = LSTM(self.batchsize, self.hidden_dim)
             self.params.extend(lstm.params)
             def lstm_encode(m):
@@ -178,16 +179,17 @@ class MemoryLayer(object):
                 return results.dimshuffle(1, 0, 2)
             self.encoder_func = lambda m: lstm_encode(m)
         elif encoder == 'lstm2': # bidirectional lstm towards center.
+            print 'using LSTM2 encoder'
             lstm1 = LSTM(self.batchsize, self.hidden_dim)
             self.params.extend(lstm1.params)
             lstm2 = LSTM(self.batchsize, self.hidden_dim)
             self.params.extend(lstm2.params)
             def lstm_encode(m):
                 results1, updates = theano.scan(fn=lambda mi: lstm1(mi),
-                                               sequences=[m.dimshuffle(1, 2, 0, 3)]
+                                               sequences=[m.dimshuffle(1, 2, 0, 3)],
                                                n_steps=int(np.ceil(unit_size/2)))
                 results2, updates = theano.scan(fn=lambda mi: lstm2(mi),
-                                               sequences=[m.dimshuffle(1, 2, 0, 3)[::-1, :, :, :]]
+                                               sequences=[m.dimshuffle(1, 2, 0, 3)[::-1, :, :, :]],
                                                n_steps=int(np.ceil(unit_size/2)))
                 return (results1.dimshuffle(1, 0, 2) + results2.dimshuffle(1, 0, 2)) / 2.0
             self.encoder_func = lambda m: lstm_encode(m)
