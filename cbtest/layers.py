@@ -145,11 +145,11 @@ class LinearLayer(Layer):
 
 
 class MemoryLayer(object):
-    def __init__(self, batchsize, mem_size, sen_maxlen, vocab_size, hidden_dim,
+    def __init__(self, batchsize, mem_size, unit_size, vocab_size, hidden_dim,
                  encoder='bow', **kwargs):
         self.batchsize = batchsize
         self.mem_size = mem_size
-        self.sen_maxlen = sen_maxlen
+        self.unit_size = unit_size
         self.hidden_dim = hidden_dim
         self.vocab_size = vocab_size
         self.encoder = encoder
@@ -164,7 +164,7 @@ class MemoryLayer(object):
         if encoder == 'bow':
             if kwargs['position_encoding']:
                 print '[memory layer] use PE'
-                lmat = position_encoding(self.sen_maxlen, self.hidden_dim).dimshuffle('x', 'x', 0, 1)
+                lmat = position_encoding(self.unit_size, self.hidden_dim).dimshuffle('x', 'x', 0, 1)
                 self.encoder_func = lambda m: mean(m * lmat, axis=2)
             else:
                 self.encoder_func = lambda m: mean(m, axis=2)
@@ -177,15 +177,30 @@ class MemoryLayer(object):
                                                )
                 return results.dimshuffle(1, 0, 2)
             self.encoder_func = lambda m: lstm_encode(m)
+        elif encoder == 'lstm2': # bidirectional lstm towards center.
+            lstm1 = LSTM(self.batchsize, self.hidden_dim)
+            self.params.extend(lstm1.params)
+            lstm2 = LSTM(self.batchsize, self.hidden_dim)
+            self.params.extend(lstm2.params)
+            def lstm_encode(m):
+                results1, updates = theano.scan(fn=lambda mi: lstm1(mi),
+                                               sequences=[m.dimshuffle(1, 2, 0, 3)]
+                                               n_steps=int(np.ceil(unit_size/2)))
+                results2, updates = theano.scan(fn=lambda mi: lstm2(mi),
+                                               sequences=[m.dimshuffle(1, 2, 0, 3)[::-1, :, :, :]]
+                                               n_steps=int(np.ceil(unit_size/2)))
+                return (results1.dimshuffle(1, 0, 2) + results2.dimshuffle(1, 0, 2)) / 2.0
+            self.encoder_func = lambda m: lstm_encode(m)
+
         elif encoder == 'weighted':
-            linear = LinearLayer(self.sen_maxlen, 1)
+            linear = LinearLayer(self.unit_size, 1)
             self.params.extend(linear.params)
             self.encoder_func = lambda m: linear(m.dimshuffle(0, 1, 3, 2)).flatten(3)
 
 
     def get_probs(self, contexts, u):
         # memory vectors.
-        m = T.reshape(self.input_embed(contexts.flatten()), (self.batchsize, self.mem_size, self.sen_maxlen, self.hidden_dim))
+        m = T.reshape(self.input_embed(contexts.flatten()), (self.batchsize, self.mem_size, self.unit_size, self.hidden_dim))
         m = self.encoder_func(m)
         probs, updates = theano.scan(fn=lambda mvs, uv: softmax(dot(mvs, uv)),
                         sequences=[m, u]
@@ -202,7 +217,7 @@ class MemoryLayer(object):
         probs = self.get_probs(contexts, u)
 
         # output vectors.
-        c = T.reshape(self.output_embed(contexts.flatten()), (self.batchsize, self.mem_size, self.sen_maxlen, self.hidden_dim))
+        c = T.reshape(self.output_embed(contexts.flatten()), (self.batchsize, self.mem_size, self.unit_size, self.hidden_dim))
         c = self.encoder_func(c)
 
         outputs, updates = theano.scan(fn=lambda probv, cv: dot(cv, T.transpose(probv)),

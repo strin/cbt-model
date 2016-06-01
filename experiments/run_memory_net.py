@@ -16,7 +16,7 @@ parser.add_argument('--iter', type=int, default=20)
 parser.add_argument('--encoder', type=str, default='bow')
 parser.add_argument('--memory', type=str, default='lexical')
 parser.add_argument('--small', type=bool, default=False)
-parser.add_argument('--PE', type=str, default=True) # Position Encoding.
+parser.add_argument('--PE', action='store_true')
 
 args = parser.parse_args()
 print colorize('[arguments]\t' + str(args), 'red')
@@ -41,9 +41,9 @@ try:
     learner.preprocess_dataset(test_exs)
 
     if args.memory == 'lexical':
-        learner.mem_size = 1024
+        learner.mem_size = 10240
         learner.unit_size = 1
-        learner.sen_maxlen = 128 # query sentence len.
+        learner.sen_maxlen = 512 # query sentence len.
         learner.encode_context = learner.encode_context_lexical
         learner.encode_query = learner.encode_query_lexical
         learner.arch = learner.arch_memnet_lexical
