@@ -56,7 +56,8 @@ class CBTLearner(object):
     def create_vocab(self, exs):
         vocab = {
             '<null>': 0, # no word in current position.
-            '<unk>': 1 # unknown word.
+            '<unk>': 1,  # unknown word.
+            'xxxxx': 2,  # blank in query.
         }
 
         def add_word_if_not_exist(word):

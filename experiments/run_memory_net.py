@@ -17,7 +17,7 @@ parser.add_argument('--encoder', type=str, default='bow')
 parser.add_argument('--memory', type=str, default='lexical')
 parser.add_argument('--small', action='store_true')
 parser.add_argument('--PE', action='store_true')
-parser.add_argument('--window_b', type=float, default=2)
+parser.add_argument('--window_b', type=int, default=2)
 
 args = parser.parse_args()
 print colorize('[arguments]\t' + str(args), 'red')
