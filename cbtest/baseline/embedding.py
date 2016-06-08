@@ -1,6 +1,6 @@
 # basic embeding models as baselines.
 from cbtest.common import *
-from cbtest.layers import (log, dot, mean, softmax, Embed, floatX, stack, LSTM, MemoryLayer, LinearLayer, position_encoding)
+from cbtest.layers import (log, dot, mean, softmax, Embed, floatX, stack, LSTM, MemoryLayer, LinearLayer, position_encoding, LSTMq)
 from cbtest.utils import choice, Timer
 from cbtest.evaluate import (accuracy, disagree)
 from cbtest.dataset import remove_stopwords, lower, remove_punctuation, filter, unkify
@@ -229,6 +229,46 @@ class CBTLearner(object):
                 print '[warning] network out of memory'
                 break
         return np.array(res, dtype=np.int64)
+
+
+    def arch_lstmq(self, param_b=2):
+
+        contexts = T.ltensor3('contexts')
+        querys = T.lmatrix('querys')
+        yvs = T.lvector('yvs')
+
+        params = []
+        question_layer = Embed(self.vocab_size, self.hidden_dim)
+        params.extend(question_layer.params)
+        q = T.reshape(question_layer(querys.flatten()),
+                      (self.batchsize, self.sen_maxlen, self.hidden_dim)
+                      )
+        lmat = position_encoding(self.sen_maxlen, self.hidden_dim).dimshuffle('x', 0, 1)
+        q = q * lmat
+        u = mean(q, axis=1)
+
+
+        embed_layer = Embed(self.vocab_size, self.hidden_dim)
+        params.extend(embed_layer.params)
+        lmat = position_encoding(self.unit_size, self.hidden_dim).dimshuffle('x', 'x', 0, 1)
+        m = T.reshape(embed_layer(contexts.flatten()), (self.batchsize, self.mem_size, self.unit_size, self.hidden_dim))
+        m = mean(m * lmat, axis=2)
+
+        lstm = LSTMq(self.batchsize, self.hidden_dim)
+        params.extend(lstm.params)
+        o = lstm(m.dimshuffle(1, 0, 2), u)
+
+        linear = LinearLayer(self.hidden_dim, self.vocab_size)
+        params.extend(linear.params)
+        probs = softmax(linear(o))
+
+        inputs = {
+            'contexts': contexts,
+            'querys': querys,
+            'yvs': yvs,
+            'cvs': T.lmatrix('cvs')
+        }
+        return (probs, inputs, params)
 
 
     def encode_query_sentence(self, ex):

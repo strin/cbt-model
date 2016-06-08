@@ -74,13 +74,14 @@ class Embed(Layer):
         return self.W[symbols, :]
 
 
+
+
 class LSTM(Layer):
     '''
     basic LSTM layer
     '''
-    def __init__(self, batchsize, hidden_dim):
+    def __init__(self, hidden_dim=100):
         self.hidden_dim = hidden_dim
-        self.batchsize = batchsize
         self.W = theano.shared(
                     np.concatenate([ortho_weight(hidden_dim),
                                     ortho_weight(hidden_dim),
@@ -105,6 +106,7 @@ class LSTM(Layer):
 
 
     def _step(self, x, c, h):
+        dot = lambda a, b: T.tensordot(a, b, axes=1) # use more generalized tensordot.
         W = lambda i: self.W[:, self.hidden_dim * (i-1) : self.hidden_dim * i]
         U = lambda i: self.U[:, self.hidden_dim * (i-1) : self.hidden_dim * i]
         b = lambda i: self.b[:, self.hidden_dim * (i-1) : self.hidden_dim * i]
@@ -119,17 +121,77 @@ class LSTM(Layer):
         return c, h
 
 
-    def __call__(self, inputs):
-        zero = np.array([0.], dtype=theano.config.floatX)[0]
+    def __call__(self, inputs, n_steps=None):
         result, updates = theano.scan(lambda x, c, h: self._step(x, c, h),
+                        outputs_info = [T.zeros_like(inputs[0]),
+                                        T.zeros_like(inputs[0])
+                                                      ],
+                                        name='lstm_layer',
+                                        sequences=[inputs],
+                                        n_steps=n_steps
+                    )
+        return result[1] # return h.
+
+
+class LSTMq(Layer):
+    '''
+    adaptive LSTM
+    '''
+    def __init__(self, batchsize, hidden_dim):
+        self.hidden_dim = hidden_dim
+        self.batchsize = batchsize
+        self.W = theano.shared(
+                    np.concatenate([ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim)], axis=1),
+                    name='W'
+                )
+
+        self.U = theano.shared(
+                    np.concatenate([ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim),
+                                    ortho_weight(hidden_dim)], axis=1),
+                    name='U'
+                )
+        self.b = theano.shared(
+                    np.zeros((1, 4 * hidden_dim * 2), dtype=theano.config.floatX),
+                    name='b',
+                    broadcastable=(True, False)
+                )
+        self.params = [self.W, self.U, self.b]
+
+
+    def _step(self, x, c, h, q):
+        W = lambda i: self.W[:, self.hidden_dim * (i-1) : self.hidden_dim * i]
+        U = lambda i: self.U[:, self.hidden_dim * (i-1) : self.hidden_dim * i]
+        b = lambda i: self.b[:, self.hidden_dim * (i-1) : self.hidden_dim * i]
+        i = sigmoid(dot(x, W(1)) + dot(q, W(2)) + dot(h, U(1)) + b(1))
+        f = sigmoid(dot(x, W(3)) + dot(q, W(4)) + dot(h, U(2)) + b(2))
+        o = sigmoid(dot(x, W(5)) + dot(q, W(6)) + dot(h, U(3)) + b(3))
+        _c = tanh(dot(x, W(7)) + dot(h, U(4)) + b(4))
+
+        c = _c * i + c * f
+        h = o * tanh(c)
+
+        return c, h
+
+
+    def __call__(self, inputs, query):
+        zero = np.array([0.], dtype=theano.config.floatX)[0]
+        result, updates = theano.scan(self._step,
                                       outputs_info = [T.zeros((self.batchsize, self.hidden_dim)),
                                                     T.zeros((self.batchsize, self.hidden_dim))
                                                       ],
                                         name='lstm_layer',
-                                        sequences=[inputs]
+                                        sequences=[inputs],
+                                        non_sequences=query
                     )
         return result[1][-1] # return h.
-
 
 
 class LinearLayer(Layer):
@@ -172,27 +234,21 @@ class MemoryLayer(object):
             print 'using LSTM encoder'
             lstm = LSTM(self.batchsize, self.hidden_dim)
             self.params.extend(lstm.params)
-            def lstm_encode(m):
-                results, updates = theano.scan(fn=lambda mi: lstm(mi),
-                                               sequences=[m.dimshuffle(1, 2, 0, 3)]
-                                               )
-                return results.dimshuffle(1, 0, 2)
-            self.encoder_func = lambda m: lstm_encode(m)
+            self.encoder_func = lambda m: lstm(m.dimshuffle(2, 0, 1, 3))
         elif encoder == 'lstm2': # bidirectional lstm towards center.
             print 'using LSTM2 encoder'
             lstm1 = LSTM(self.batchsize, self.hidden_dim)
             self.params.extend(lstm1.params)
             lstm2 = LSTM(self.batchsize, self.hidden_dim)
             self.params.extend(lstm2.params)
-            def lstm_encode(m):
-                results1, updates = theano.scan(fn=lambda mi: lstm1(mi),
-                                               sequences=[m.dimshuffle(1, 2, 0, 3)],
-                                               n_steps=int(np.ceil(unit_size/2)))
-                results2, updates = theano.scan(fn=lambda mi: lstm2(mi),
-                                               sequences=[m.dimshuffle(1, 2, 0, 3)[::-1, :, :, :]],
-                                               n_steps=int(np.ceil(unit_size/2)))
-                return (results1.dimshuffle(1, 0, 2) + results2.dimshuffle(1, 0, 2)) / 2.0
-            self.encoder_func = lambda m: lstm_encode(m)
+            self.encoder_func = lambda m: (lstm1(m.dimshuffle(2, 0, 1, 3), n_steps=int(np.ceil(unit_size/2)))
+                                          +lstm2(m.dimshuffle(2, 0, 1, 3)[::-1, :, :, :], n_steps=int(np.ceil(unit_size/2)))) / floatX(2.0)
+        elif encoder == 'lstm2-shared': # bidirectional lstm towards center.
+            print 'using LSTM2 shared encoder'
+            lstm = LSTM(self.batchsize, self.hidden_dim)
+            self.params.extend(lstm.params)
+            self.encoder_func = lambda m: (lstm(m.dimshuffle(2, 0, 1, 3), n_steps=int(np.ceil(unit_size/2)))
+                                          +lstm(m.dimshuffle(2, 0, 1, 3)[::-1, :, :, :], n_steps=int(np.ceil(unit_size/2)))) / floatX(2.0)
 
         elif encoder == 'weighted':
             linear = LinearLayer(self.unit_size, 1)

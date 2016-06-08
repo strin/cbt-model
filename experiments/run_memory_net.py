@@ -51,12 +51,20 @@ try:
         learner.arch = learner.arch_memnet_lexical
     elif args.memory == 'window':
         param_b = args.window_b
-        learner.mem_size = 1024
+        learner.mem_size = 128
         learner.unit_size = 2 * param_b + 1
         learner.sen_maxlen = 2 * param_b + 1
         learner.encode_context = lambda ex: learner.encode_context_window(ex, param_b=param_b)
         learner.encode_query = lambda ex: learner.encode_query_window(ex, param_b=param_b)
         learner.arch = learner.arch_memnet_lexical
+    elif args.memory == 'lstmq':
+        param_b = args.window_b
+        learner.mem_size = 1024
+        learner.unit_size = 2 * param_b + 1
+        learner.sen_maxlen = 2 * param_b + 1
+        learner.encode_context = lambda ex: learner.encode_context_window(ex, param_b=param_b)
+        learner.encode_query = lambda ex: learner.encode_query_window(ex, param_b=param_b)
+        learner.arch = lambda: learner.arch_lstmq(param_b=param_b)
     elif args.memory == 'sentence':
         learner.mem_size = 20
         learner.unit_size = 1024
